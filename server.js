@@ -267,20 +267,32 @@ async function sendWhatsAppMessage(chatId, message) {
 }
 
 // ======================================
-// WHATSAPP COMMAND HANDLER
+// WHATSAPP MESSAGE HANDLER
 // ======================================
 
 async function handleWhatsAppMessage(message) {
-  if (!message || message.from_me === true) return;
+  if (!message || message.from_me === true) {
+    console.log("WHAPI: Own message ignored.");
+    return;
+  }
 
-  if (message.type !== "text") return;
+  if (message.type !== "text") {
+    console.log("WHAPI: Non-text message ignored.");
+    return;
+  }
 
   const chatId = message.chat_id;
-  const text = message.text?.body?.trim();
+  const incomingText = message.text?.body?.trim();
 
-  if (!chatId || !text) return;
+  if (!chatId || !incomingText) {
+    console.log("WHAPI: Missing chat ID or text.");
+    return;
+  }
 
-  if (text.length > 2000) return;
+  if (incomingText.length > 2000) {
+    console.log("WHAPI: Message too long.");
+    return;
+  }
 
   const isGroup = chatId.endsWith("@g.us");
 
@@ -289,21 +301,31 @@ async function handleWhatsAppMessage(message) {
     message.from ||
     "Friend";
 
-  const isCommand = text.startsWith("/");
+  const isCommand = incomingText.startsWith("/");
 
   const isMentioned =
-    /@?TeenVibe/i.test(text);
+    /@?TeenVibe/i.test(incomingText);
 
-  // HYBRID MODE
+  console.log("WHAPI: Incoming text recognised.", {
+    isGroup,
+    isCommand,
+    isMentioned
+  });
+
+  // GROUPS ONLY RESPOND TO MENTIONS OR COMMANDS
   if (isGroup && !isCommand && !isMentioned) {
+    console.log("WHAPI: Group message not addressed to bot.");
     return;
   }
 
   let responseText = "";
 
-  // COMMAND PROCESSING
+  // ====================================
+  // COMMANDS
+  // ====================================
+
   if (isCommand) {
-    const parts = text.split(/\s+/);
+    const parts = incomingText.split(/\s+/);
     const command = parts[0].toLowerCase();
 
     const commandType = command.replace("/", "");
@@ -361,9 +383,12 @@ async function handleWhatsAppMessage(message) {
     }
   }
 
+  // ====================================
+  // NORMAL AI CONVERSATION
+  // ====================================
+
   else {
-    // NORMAL AI CONVERSATION
-    const cleanMessage = text
+    const cleanMessage = incomingText
       .replace(/@?TeenVibe/gi, "")
       .trim();
 
@@ -378,8 +403,16 @@ async function handleWhatsAppMessage(message) {
     }
   }
 
+  // ====================================
+  // SEND RESPONSE
+  // ====================================
+
   if (responseText) {
     await sendWhatsAppMessage(chatId, responseText);
+
+    console.log("WHAPI: Reply sent successfully.", {
+      isGroup
+    });
   }
 }
 
@@ -388,25 +421,42 @@ async function handleWhatsAppMessage(message) {
 // ======================================
 
 app.post("/whapi/webhook/:secret", (req, res) => {
+
+  console.log("WHAPI WEBHOOK REQUEST RECEIVED.");
+
   if (!WHAPI_WEBHOOK_SECRET) {
+    console.error("WHAPI: Webhook secret is missing.");
     return res.sendStatus(503);
   }
 
   if (req.params.secret !== WHAPI_WEBHOOK_SECRET) {
+    console.error("WHAPI: Webhook secret verification failed.");
     return res.sendStatus(401);
   }
 
-  // Acknowledge the webhook quickly.
-  res.sendStatus(200);
-
   const messages = req.body?.messages;
 
-  if (!Array.isArray(messages)) return;
+  console.log("WHAPI WEBHOOK AUTHENTICATED:", {
+    event: req.body?.event || "unknown",
+    hasMessages: Array.isArray(messages),
+    messageCount: Array.isArray(messages)
+      ? messages.length
+      : 0
+  });
+
+  // Respond to Whapi immediately.
+  res.sendStatus(200);
+
+  if (!Array.isArray(messages)) {
+    console.log("WHAPI: No messages array in this event.");
+    return;
+  }
 
   for (const message of messages) {
     const messageId = message?.id;
 
     if (messageId && processedMessages.has(messageId)) {
+      console.log("WHAPI: Duplicate message ignored.");
       continue;
     }
 
@@ -414,14 +464,16 @@ app.post("/whapi/webhook/:secret", (req, res) => {
       processedMessages.add(messageId);
 
       if (processedMessages.size > 5000) {
-        const oldest = processedMessages.values().next().value;
+        const oldest =
+          processedMessages.values().next().value;
+
         processedMessages.delete(oldest);
       }
     }
 
     handleWhatsAppMessage(message).catch(error => {
       console.error(
-        "WhatsApp processing error:",
+        "WHAPI PROCESSING ERROR:",
         error.message
       );
     });
@@ -435,7 +487,7 @@ app.post("/whapi/webhook/:secret", (req, res) => {
 app.get("/", (req, res) => {
   res.json({
     bot: "TeenVibe AI",
-    version: "5.0",
+    version: "5.1",
     status: "online",
     ai: GROQ_API_KEY ? "configured" : "missing_api_key",
     provider: "Groq",
