@@ -61,6 +61,7 @@ function pick(items) {
   return items[Math.floor(Math.random() * items.length)];
 }
 
+// HOME
 app.get("/", (req, res) => {
   res.json({
     bot: "TeenVibe AI",
@@ -71,6 +72,7 @@ app.get("/", (req, res) => {
   });
 });
 
+// HELP
 app.get("/help", (req, res) => {
   res.json({
     bot: "TeenVibe AI",
@@ -82,6 +84,7 @@ app.get("/help", (req, res) => {
   });
 });
 
+// ACTIVITIES
 app.get("/activity/:type", (req, res) => {
   const type = req.params.type.toLowerCase();
   const list = activities[type];
@@ -100,6 +103,7 @@ app.get("/activity/:type", (req, res) => {
   });
 });
 
+// ADD SCORE
 app.post("/score", (req, res) => {
   const { groupId, player, points } = req.body;
 
@@ -130,6 +134,7 @@ app.post("/score", (req, res) => {
   });
 });
 
+// LEADERBOARD
 app.get("/score/:groupId", (req, res) => {
   const group = getGroup(req.params.groupId);
 
@@ -143,7 +148,7 @@ app.get("/score/:groupId", (req, res) => {
   });
 });
 
-// Gemini AI conversation endpoint
+// GEMINI AI CHAT
 app.post("/chat", async (req, res) => {
   try {
     if (!GEMINI_API_KEY) {
@@ -212,59 +217,73 @@ Keep replies conversational and reasonably short.
       }
     ];
 
-let response;
-let data;
+    // AUTOMATIC GEMINI RETRIES
+    let response;
+    let data;
 
-const maxRetries = 3;
+    const maxRetries = 3;
 
-for (let attempt = 0; attempt <= maxRetries; attempt++) {
-  try {
-    response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          systemInstruction: {
-            parts: [{ text: systemInstruction }]
-          },
-          contents,
-          generationConfig: {
-            maxOutputTokens: 500
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        response = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+              systemInstruction: {
+                parts: [{ text: systemInstruction }]
+              },
+              contents,
+              generationConfig: {
+                maxOutputTokens: 500
+              }
+            }),
+            signal: AbortSignal.timeout(30000)
           }
-        }),
-        signal: AbortSignal.timeout(30000)
+        );
+
+        // Read response body ONCE
+        data = await response.json();
+
+        if (response.ok) {
+          break;
+        }
+
+        const retryable = [
+          408, 429, 500, 502, 503, 504
+        ].includes(response.status);
+
+        if (!retryable || attempt === maxRetries) {
+          break;
+        }
+
+      } catch (error) {
+        if (attempt === maxRetries) {
+          throw error;
+        }
       }
-    );
 
-    data = await response.json();
+      const delay =
+        1000 * (2 ** attempt) + Math.random() * 500;
 
-    if (response.ok) break;
+      await new Promise(resolve =>
+        setTimeout(resolve, delay)
+      );
+    }
 
-    const retryable = [408, 429, 500, 502, 503, 504]
-      .includes(response.status);
-
-    if (!retryable || attempt === maxRetries) break;
-
-  } catch (error) {
-    if (attempt === maxRetries) throw error;
-  }
-
-  const delay = 1000 * (2 ** attempt) + Math.random() * 500;
-  await new Promise(resolve => setTimeout(resolve, delay));
-}
-
-    
-    const data = await response.json();
-
-    if (!response.ok) {
-      console.error("Gemini API error:", data.error?.message);
+    // CHECK GEMINI RESPONSE
+    if (!response || !response.ok) {
+      console.error(
+        "Gemini API error:",
+        data?.error?.message || "No response received"
+      );
 
       return res.status(502).json({
         error: "Gemini could not process the message.",
-        details: data.error?.message || "Unknown API error"
+        details: data?.error?.message || "Unknown API error"
       });
     }
 
@@ -279,9 +298,18 @@ for (let attempt = 0; attempt <= maxRetries; attempt++) {
       });
     }
 
+    // SAVE CONVERSATION HISTORY
     history.push(
-      { role: "user", parts: [{ text: `${sender}: ${message.trim()}` }] },
-      { role: "model", parts: [{ text: reply }] }
+      {
+        role: "user",
+        parts: [{
+          text: `${sender}: ${message.trim()}`
+        }]
+      },
+      {
+        role: "model",
+        parts: [{ text: reply }]
+      }
     );
 
     if (history.length > 12) {
@@ -303,13 +331,14 @@ for (let attempt = 0; attempt <= maxRetries; attempt++) {
   }
 });
 
+// 404
 app.use((req, res) => {
   res.status(404).json({
     error: "Endpoint not found"
   });
 });
 
+// START SERVER
 app.listen(PORT, () => {
   console.log(`TeenVibe AI running on port ${PORT}`);
 });
-
