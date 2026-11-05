@@ -212,7 +212,14 @@ Keep replies conversational and reasonably short.
       }
     ];
 
-    const response = await fetch(
+let response;
+let data;
+
+const maxRetries = 3;
+
+for (let attempt = 0; attempt <= maxRetries; attempt++) {
+  try {
+    response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`,
       {
         method: "POST",
@@ -225,13 +232,31 @@ Keep replies conversational and reasonably short.
           },
           contents,
           generationConfig: {
-            temperature: 0.9,
             maxOutputTokens: 500
           }
-        })
+        }),
+        signal: AbortSignal.timeout(30000)
       }
     );
 
+    data = await response.json();
+
+    if (response.ok) break;
+
+    const retryable = [408, 429, 500, 502, 503, 504]
+      .includes(response.status);
+
+    if (!retryable || attempt === maxRetries) break;
+
+  } catch (error) {
+    if (attempt === maxRetries) throw error;
+  }
+
+  const delay = 1000 * (2 ** attempt) + Math.random() * 500;
+  await new Promise(resolve => setTimeout(resolve, delay));
+}
+
+    
     const data = await response.json();
 
     if (!response.ok) {
