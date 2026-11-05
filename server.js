@@ -6,8 +6,9 @@ const PORT = process.env.PORT || 3000;
 
 app.use(express.json({ limit: "20kb" }));
 
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const GEMINI_MODEL = "gemini-3.8-flash";
+// GROQ CONFIGURATION
+const GROQ_API_KEY = process.env.GROQ_API_KEY;
+const GROQ_MODEL = "openai/gpt-oss-20b";
 
 const activities = {
   fun: [
@@ -52,8 +53,12 @@ const conversations = {};
 
 function getGroup(id) {
   if (!groups[id]) {
-    groups[id] = { players: {}, gamesPlayed: 0 };
+    groups[id] = {
+      players: {},
+      gamesPlayed: 0
+    };
   }
+
   return groups[id];
 }
 
@@ -65,9 +70,11 @@ function pick(items) {
 app.get("/", (req, res) => {
   res.json({
     bot: "TeenVibe AI",
-    version: "3.0",
+    version: "4.0",
     status: "online",
-    ai: GEMINI_API_KEY ? "configured" : "missing_api_key",
+    ai: GROQ_API_KEY ? "configured" : "missing_api_key",
+    provider: "Groq",
+    model: GROQ_MODEL,
     message: "TeenVibe AI is ready!"
   });
 });
@@ -77,9 +84,17 @@ app.get("/help", (req, res) => {
   res.json({
     bot: "TeenVibe AI",
     commands: [
-      "/fun", "/truth", "/wyr", "/joke",
-      "/riddle", "/challenge", "/quiz",
-      "/team", "/score", "/chat", "/help"
+      "/fun",
+      "/truth",
+      "/wyr",
+      "/joke",
+      "/riddle",
+      "/challenge",
+      "/quiz",
+      "/team",
+      "/score",
+      "/chat",
+      "/help"
     ]
   });
 });
@@ -125,7 +140,8 @@ app.post("/score", (req, res) => {
   const group = getGroup(groupId.trim());
   const name = player.trim().slice(0, 40);
 
-  group.players[name] = (group.players[name] || 0) + points;
+  group.players[name] =
+    (group.players[name] || 0) + points;
 
   res.json({
     success: true,
@@ -139,7 +155,10 @@ app.get("/score/:groupId", (req, res) => {
   const group = getGroup(req.params.groupId);
 
   const leaderboard = Object.entries(group.players)
-    .map(([player, points]) => ({ player, points }))
+    .map(([player, points]) => ({
+      player,
+      points
+    }))
     .sort((a, b) => b.points - a.points);
 
   res.json({
@@ -148,12 +167,12 @@ app.get("/score/:groupId", (req, res) => {
   });
 });
 
-// GEMINI AI CHAT
+// GROQ AI CHAT
 app.post("/chat", async (req, res) => {
   try {
-    if (!GEMINI_API_KEY) {
+    if (!GROQ_API_KEY) {
       return res.status(503).json({
-        error: "Gemini API key is not configured."
+        error: "Groq API key is not configured."
       });
     }
 
@@ -196,6 +215,7 @@ Your personality:
 - Encourage friendship, creativity and learning.
 - Suggest fun games and group activities.
 - Respect everyone in the group.
+- Make conversations engaging and interactive.
 
 Safety:
 - Keep conversations age-appropriate.
@@ -207,46 +227,47 @@ Safety:
 Keep replies conversational and reasonably short.
 `;
 
-    const contents = [
+    const messages = [
+      {
+        role: "system",
+        content: systemInstruction
+      },
       ...history,
       {
         role: "user",
-        parts: [{
-          text: `${sender}: ${message.trim()}`
-        }]
+        content: `${sender}: ${message.trim()}`
       }
     ];
 
-    // AUTOMATIC GEMINI RETRIES
+    // AUTOMATIC GROQ RETRIES
     let response;
     let data;
+    let requestError;
 
     const maxRetries = 3;
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
         response = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`,
+          "https://api.groq.com/openai/v1/chat/completions",
           {
             method: "POST",
             headers: {
-              "Content-Type": "application/json"
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${GROQ_API_KEY}`
             },
             body: JSON.stringify({
-              systemInstruction: {
-                parts: [{ text: systemInstruction }]
-              },
-              contents,
-              generationConfig: {
-                maxOutputTokens: 500
-              }
+              model: GROQ_MODEL,
+              messages,
+              max_completion_tokens: 500,
+              temperature: 0.7
             }),
             signal: AbortSignal.timeout(30000)
           }
         );
 
-        // Read response body ONCE
-        data = await response.json();
+        // Read response body once
+        data = await response.json().catch(() => ({}));
 
         if (response.ok) {
           break;
@@ -261,8 +282,10 @@ Keep replies conversational and reasonably short.
         }
 
       } catch (error) {
+        requestError = error;
+
         if (attempt === maxRetries) {
-          throw error;
+          break;
         }
       }
 
@@ -274,27 +297,27 @@ Keep replies conversational and reasonably short.
       );
     }
 
-    // CHECK GEMINI RESPONSE
+    // CHECK GROQ RESPONSE
     if (!response || !response.ok) {
-      console.error(
-        "Gemini API error:",
-        data?.error?.message || "No response received"
-      );
+      const errorMessage =
+        data?.error?.message ||
+        requestError?.message ||
+        "No response received";
+
+      console.error("Groq API error:", errorMessage);
 
       return res.status(502).json({
-        error: "Gemini could not process the message.",
-        details: data?.error?.message || "Unknown API error"
+        error: "Groq could not process the message.",
+        details: errorMessage
       });
     }
 
-    const reply = data.candidates?.[0]?.content?.parts
-      ?.map(part => part.text || "")
-      .join("")
-      .trim();
+    const reply =
+      data.choices?.[0]?.message?.content?.trim();
 
     if (!reply) {
       return res.status(502).json({
-        error: "Gemini returned an empty response."
+        error: "Groq returned an empty response."
       });
     }
 
@@ -302,13 +325,11 @@ Keep replies conversational and reasonably short.
     history.push(
       {
         role: "user",
-        parts: [{
-          text: `${sender}: ${message.trim()}`
-        }]
+        content: `${sender}: ${message.trim()}`
       },
       {
-        role: "model",
-        parts: [{ text: reply }]
+        role: "assistant",
+        content: reply
       }
     );
 
@@ -318,6 +339,7 @@ Keep replies conversational and reasonably short.
 
     res.json({
       bot: "TeenVibe AI",
+      provider: "Groq",
       player: sender,
       reply
     });
