@@ -9,7 +9,7 @@ const express = require('express');
 const { createClient } = require('@supabase/supabase-js');
 
 const app = express();
-const PORT = Number(process.env.PORT || 3000);
+const PORT = Number(process.env.PORT || 4000);
 app.use(express.json({ limit: '30kb' }));
 
 // -----------------------------------------------------------------------------
