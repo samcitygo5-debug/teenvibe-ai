@@ -1,0 +1,21 @@
+{
+  "name": "jarvis-whatsapp-bot",
+  "version": "8.3.0",
+  "private": true,
+  "description": "JARVIS WhatsApp assistant with reviewed Azahra-style extensions",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "check": "node --check server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.49.8",
+    "@whiskeysockets/baileys": "^6.7.18",
+    "express": "^4.21.2",
+    "pino": "^9.6.0",
+    "qrcode-terminal": "^0.12.0"
+  }
+}
